@@ -29,6 +29,10 @@ static bool too_many_loops (unsigned loops);
 static void busy_wait (int64_t loops);
 static void real_time_sleep (int64_t num, int32_t denom);
 static void real_time_delay (int64_t num, int32_t denom);
+bool sort(const struct list_elem *one, const struct list_elem *two, void *aux UNUSED);
+
+static struct list ready_list;
+static struct semaphore wait_sema;
 
 /* Sets up the timer to interrupt TIMER_FREQ times per second,
    and registers the corresponding interrupt. */
@@ -37,6 +41,7 @@ timer_init (void)
 {
   pit_configure_channel (0, 2, TIMER_FREQ);
   intr_register_ext (0x20, timer_interrupt, "8254 Timer");
+  list_init (&ready_list); 
 }
 
 /* Calibrates loops_per_tick, used to implement brief delays. */
@@ -87,15 +92,40 @@ timer_elapsed (int64_t then)
 /* Sleeps for approximately TICKS timer ticks.  Interrupts must
    be turned on. */
 void
-timer_sleep (int64_t ticks) 
+timer_sleep(int64_t ticks)
 {
-  int64_t start = timer_ticks ();
 
   ASSERT (intr_get_level () == INTR_ON);
-  while (timer_elapsed (start) < ticks) 
-    thread_yield ();
+  if(ticks <= 0) 
+  {
+    return;
+  }
+
+// NEED TO KNOW WHICH SEMAPHORE YOU ARE ADDING TO THE LIST
+  // BECAUSE WHEN YOU RELEASE YOU NEED TO KNOW WHICH ONE IS WHICH
+  // SO EITHER MAKE ANOTHER LIST OR MODFIY IT IN TO THE THREAD STRUCT
+
+  sema_init (&wait_sema, 0);  // Initialize a semaphore
+
+  thread_current()->ticks = timer_ticks() + ticks;  
+  list_insert_ordered(&ready_list, &thread_current()->elem, 
+                      &sort, NULL); // insert elem in list
+  sema_down (&wait_sema);     
+
 }
 
+bool
+sort(const struct list_elem *one, const struct list_elem *two, void *aux UNUSED)
+{
+    struct thread *tone = list_entry (one, struct thread, elem);
+    struct thread *ttwo = list_entry (two, struct thread, elem);
+
+    if(tone->ticks < ttwo ->ticks)
+    {
+      return true;
+    }
+    return false;
+}
 /* Sleeps for approximately MS milliseconds.  Interrupts must be
    turned on. */
 void
@@ -172,6 +202,21 @@ timer_interrupt (struct intr_frame *args UNUSED)
 {
   ticks++;
   thread_tick ();
+  // sema_init (&wait_sema, 1);
+  // sema_up (&wait_sema);
+
+  struct list_elem *e = list_begin(&ready_list);
+  while(e != list_end(&ready_list))
+  {
+    struct thread *t = list_entry(e, struct thread, elem);
+    if(ticks < t->ticks)
+    {
+      break;
+    }
+    list_remove(e);
+    thread_unblock(t);
+    e = list_begin(&ready_list);
+  }
 }
 
 /* Returns true if LOOPS iterations waits for more than one timer
