@@ -19,6 +19,7 @@
 
 /* Number of timer ticks since OS booted. */
 static int64_t ticks;
+static int64_t size_sleep_list;
 
 /* Number of loops per timer tick.
    Initialized by timer_calibrate(). */
@@ -29,9 +30,12 @@ static bool too_many_loops (unsigned loops);
 static void busy_wait (int64_t loops);
 static void real_time_sleep (int64_t num, int32_t denom);
 static void real_time_delay (int64_t num, int32_t denom);
-bool sort(const struct list_elem *one, const struct list_elem *two, void *aux UNUSED);
+bool compare(const struct list_elem *one, const struct list_elem *two, void *aux UNUSED);
+void timer_wakeup (void);
 
-static struct list ready_list;
+/* List of processes sleeping */
+static struct list sleep_list;
+/* Semaphore used for blocking/unblocking */
 static struct semaphore wait_sema;
 
 /* Sets up the timer to interrupt TIMER_FREQ times per second,
@@ -40,8 +44,7 @@ void
 timer_init (void) 
 {
   pit_configure_channel (0, 2, TIMER_FREQ);
-  intr_register_ext (0x20, timer_interrupt, "8254 Timer");
-  list_init (&ready_list); 
+  intr_register_ext (0x20, timer_interrupt, "8254 Timer"); 
 }
 
 /* Calibrates loops_per_tick, used to implement brief delays. */
@@ -100,22 +103,15 @@ timer_sleep(int64_t ticks)
   {
     return;
   }
-
-// NEED TO KNOW WHICH SEMAPHORE YOU ARE ADDING TO THE LIST
-  // BECAUSE WHEN YOU RELEASE YOU NEED TO KNOW WHICH ONE IS WHICH
-  // SO EITHER MAKE ANOTHER LIST OR MODFIY IT IN TO THE THREAD STRUCT
-
-  sema_init (&wait_sema, 0);  // Initialize a semaphore
-
   thread_current()->ticks = timer_ticks() + ticks;  
-  list_insert_ordered(&ready_list, &thread_current()->elem, 
-                      &sort, NULL); // insert elem in list
-  sema_down (&wait_sema);     
-
+  list_insert_ordered(&sleep_list, &thread_current()->elem, compare, NULL); // insert elem in list
+  size_sleep_list++;
+  thread_yield();
+  //sema_down (&wait_sema);     
 }
 
 bool
-sort(const struct list_elem *one, const struct list_elem *two, void *aux UNUSED)
+compare(const struct list_elem *one, const struct list_elem *two, void *aux UNUSED)
 {
     struct thread *tone = list_entry (one, struct thread, elem);
     struct thread *ttwo = list_entry (two, struct thread, elem);
@@ -125,6 +121,27 @@ sort(const struct list_elem *one, const struct list_elem *two, void *aux UNUSED)
       return true;
     }
     return false;
+}
+
+void
+timer_wakeup (void)
+{
+  struct thread* t;
+  while(size_sleep_list)
+  {
+    t = list_entry (list_front (&sleep_list), struct thread, elem);
+    if(ticks >= t->ticks)
+    {
+      list_pop_front (&sleep_list);
+      thread_unblock(t);
+      //sema_up(&wait_sema);
+      size_sleep_list--;
+    }
+    else 
+    {
+      break;
+    }
+  }
 }
 /* Sleeps for approximately MS milliseconds.  Interrupts must be
    turned on. */
@@ -201,22 +218,8 @@ static void
 timer_interrupt (struct intr_frame *args UNUSED)
 {
   ticks++;
+  timer_wakeup ();
   thread_tick ();
-  // sema_init (&wait_sema, 1);
-  // sema_up (&wait_sema);
-
-  struct list_elem *e = list_begin(&ready_list);
-  while(e != list_end(&ready_list))
-  {
-    struct thread *t = list_entry(e, struct thread, elem);
-    if(ticks < t->ticks)
-    {
-      break;
-    }
-    list_remove(e);
-    thread_unblock(t);
-    e = list_begin(&ready_list);
-  }
 }
 
 /* Returns true if LOOPS iterations waits for more than one timer

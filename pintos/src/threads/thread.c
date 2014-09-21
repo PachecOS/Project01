@@ -24,6 +24,8 @@
    that are ready to run but not actually running. */
 static struct list ready_list;
 
+static struct list sleep_list;
+
 /* List of all processes.  Processes are added to this list
    when they are first scheduled and removed when they exit. */
 static struct list all_list;
@@ -36,6 +38,8 @@ static struct thread *initial_thread;
 
 /* Lock used by allocate_tid(). */
 static struct lock tid_lock;
+
+static struct semaphore wait_sema;
 
 /* Stack frame for kernel_thread(). */
 struct kernel_thread_frame 
@@ -89,6 +93,7 @@ thread_init (void)
 {
   ASSERT (intr_get_level () == INTR_OFF);
 
+  sema_init (&wait_sema, 0);  // Initialize a semaphore
   lock_init (&tid_lock);
   list_init (&ready_list);
   list_init (&all_list);
