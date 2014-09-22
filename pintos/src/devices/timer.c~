@@ -41,27 +41,25 @@ static void wake_threads(struct thread *t, void *aux);
 static bool compare(const struct list_elem *one, const struct list_elem *two, void *aux UNUSED);
 void timer_wakeup (void);
 
-void
-timer_wakeup (void)
+/* Called from timer_interupt
+ * For each thread created, call sema_up to thread_unblock
+ */
+static void
+wake_threads(struct thread *t, void *aux)
 {
-  	struct thread* t;
-  	while(size_sleep_list)
- 	{
-    	t = list_entry (list_front (&sleep_list), struct thread, elem);
-    	if(ticks >= t->wakeup_ticks)
-    	{
-      		lock_acquire (&rwlock);
-      		list_pop_front (&sleep_list);
-      		lock_release (&rwlock);
-      		//thread_unblock(t);
-      		sema_up(&t->wait_sema);
-      		size_sleep_list--;
-    	}
-    	else 
-    	{
-      		break;
-    	}
-  	}
+    if(t->status == THREAD_BLOCKED)
+    {
+        if(t->wakeup_ticks > 0)
+        {
+            t->wakeup_ticks--;
+            if(t->wakeup_ticks == 0)
+            {
+				
+                sema_up (&t->wait_sema);
+				//list_pop_front (&sleep_list);
+            }
+        }
+    }
 }
 
 static bool
@@ -156,21 +154,8 @@ timer_sleep (int64_t ticks)
 
   	struct thread *t = thread_current();
 
-  	t->wakeup_ticks = start + ticks;
+	t->wakeup_ticks = ticks;
   	sema_init (&t->wait_sema, 0);
-  
-  	lock_init (&rwlock);
-
-  	lock_acquire (&rwlock);
-	if (size_sleep_list == 0) {
-		list_init(&sleep_list);
-		list_push_front(&sleep_list, &t->sleepelem);
-	}
-  	else {
-		//list_insert_ordered(&sleep_list, &t->sleepelem, compare, NULL);
-	}
-  	size_sleep_list++;
-  	lock_release (&rwlock);
 
   	sema_down (&t->wait_sema);
 
@@ -251,29 +236,13 @@ static void
 timer_interrupt (struct intr_frame *args UNUSED)
 {
   	ticks++;
+
+	//timer_wakeup();
   	thread_tick ();
 
   	thread_foreach(wake_threads, 0);
 }
 
-/* Called from timer_interupt
- * For each thread created, call sema_up to thread_unblock
- */
-static void
-wake_threads(struct thread *t, void *aux)
-{
-    if(t->status == THREAD_BLOCKED)
-    {
-        if(t->wakeup_ticks > 0)
-        {
-            t->wakeup_ticks--;
-            if(t->wakeup_ticks == 0)
-            {
-                sema_up (&t->wait_sema);
-            }
-        }
-    }
-}
 
 /* Returns true if LOOPS iterations waits for more than one timer
    tick, otherwise false. */
