@@ -24,7 +24,7 @@ static int64_t size_sleep_list;
 
 static struct lock lock;
 
-//static struct semaphore wait_sema;
+static struct semaphore wait_sema;
 
 /* Number of loops per timer tick.
    Initialized by timer_calibrate(). */
@@ -48,7 +48,7 @@ timer_wakeup (void)
   while(size_sleep_list)
   {
     t = list_entry (list_front (&sleep_list), struct thread, elem);
-    if(ticks >= t->wakeup_ticks)
+    if(ticks >= t->ticks)
     {
       lock_acquire(&lock);
       list_pop_front (&sleep_list);
