@@ -201,6 +201,11 @@ thread_create (const char *name, int priority,
   /* Add to run queue. */
   thread_unblock (t);
 
+  if(Priority > thread_current () ->Priority)
+  {
+    thread_yield ();
+  }
+
   return tid;
 }
 
@@ -335,14 +340,35 @@ thread_foreach (thread_action_func *func, void *aux)
 void
 thread_set_priority (int new_priority) 
 {
-  thread_current ()->priority = new_priority;
+   if (thread_mlfqs)
+    {
+      return;
+    }
+  enum intr_level old_level = intr_disable ();
+  int old_priority = thread_current()->priority;
+  thread_current ()->init_priority = new_priority;
+  refresh_priority();
+  // If new priority is greater, donate it
+  if (old_priority < thread_current()->priority)
+    {
+      donate_priority();
+    }
+  // If new priority is less, test if the processor should be yielded
+  if (old_priority > thread_current()->priority)
+    {
+      test_max_priority();
+    }
+  intr_set_level (old_level);
 }
 
 /* Returns the current thread's priority. */
 int
 thread_get_priority (void) 
 {
-  return thread_current ()->priority;
+  enum intr_level old_level = intr_disable ();
+  int temp = thread_current ()->priority;
+  intr_set_level (old_level);
+  return temp;
 }
 
 /* Sets the current thread's nice value to NICE. */
@@ -495,7 +521,18 @@ next_thread_to_run (void)
   if (list_empty (&ready_list))
     return idle_thread;
   else
+    list_sort (&ready_list, high_priority, NULL);
     return list_entry (list_pop_front (&ready_list), struct thread, elem);
+}
+
+static bool
+HIGH_PRIORITY (const struct list_elem *a_, const struct list_elem *b_
+                void *aux UNUSED)
+{
+  const struct thread *a = list_entry (a_, struct thread, elem);
+  const struct thread *b = list_entry (b_, struct thread, elem);
+
+  return a->priority > b->priority;
 }
 
 /* Completes a thread switch by activating the new thread's page

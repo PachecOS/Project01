@@ -98,6 +98,9 @@ struct thread
 
     struct semaphore wait_sema;
 
+    int init_priority;
+    struct lock *wait_on_lock;
+
 #ifdef USERPROG
     /* Owned by userprog/process.c. */
     uint32_t *pagedir;                  /* Page directory. */
