@@ -171,6 +171,7 @@ thread_create (const char *name, int priority,
   struct switch_entry_frame *ef;
   struct switch_threads_frame *sf;
   tid_t tid;
+  enum intr_level old_level;
 
   ASSERT (function != NULL);
 
@@ -182,6 +183,8 @@ thread_create (const char *name, int priority,
   /* Initialize thread. */
   init_thread (t, name, priority);
   tid = t->tid = allocate_tid ();
+
+  old_level = intr_disable ();
 
   /* Stack frame for kernel_thread(). */
   kf = alloc_frame (t, sizeof *kf);
@@ -198,13 +201,14 @@ thread_create (const char *name, int priority,
   sf->eip = switch_entry;
   sf->ebp = 0;
 
+  intr_set_level (old_level);
+
   /* Add to run queue. */
   thread_unblock (t);
 
-  if(Priority > thread_current () ->Priority)
-  {
-    thread_yield ();
-  }
+  old_level = intr_disable ();
+  test_max_priority ();
+  intr_set_level (old_level);
 
   return tid;
 }
@@ -340,35 +344,14 @@ thread_foreach (thread_action_func *func, void *aux)
 void
 thread_set_priority (int new_priority) 
 {
-   if (thread_mlfqs)
-    {
-      return;
-    }
-  enum intr_level old_level = intr_disable ();
-  int old_priority = thread_current()->priority;
-  thread_current ()->init_priority = new_priority;
-  refresh_priority();
-  // If new priority is greater, donate it
-  if (old_priority < thread_current()->priority)
-    {
-      donate_priority();
-    }
-  // If new priority is less, test if the processor should be yielded
-  if (old_priority > thread_current()->priority)
-    {
-      test_max_priority();
-    }
-  intr_set_level (old_level);
+  thread_current ()->priority = new_priority;
 }
 
 /* Returns the current thread's priority. */
 int
 thread_get_priority (void) 
 {
-  enum intr_level old_level = intr_disable ();
-  int temp = thread_current ()->priority;
-  intr_set_level (old_level);
-  return temp;
+  return thread_current ()->priority;
 }
 
 /* Sets the current thread's nice value to NICE. */
@@ -479,7 +462,7 @@ init_thread (struct thread *t, const char *name, int priority)
 {
   enum intr_level old_level;
 
-  sema_init(&t->wait_sema, 0);
+  //sema_init(&t->wait_sema, 0);
 
   ASSERT (t != NULL);
   ASSERT (PRI_MIN <= priority && priority <= PRI_MAX);
@@ -521,18 +504,7 @@ next_thread_to_run (void)
   if (list_empty (&ready_list))
     return idle_thread;
   else
-    list_sort (&ready_list, high_priority, NULL);
     return list_entry (list_pop_front (&ready_list), struct thread, elem);
-}
-
-static bool
-HIGH_PRIORITY (const struct list_elem *a_, const struct list_elem *b_
-                void *aux UNUSED)
-{
-  const struct thread *a = list_entry (a_, struct thread, elem);
-  const struct thread *b = list_entry (b_, struct thread, elem);
-
-  return a->priority > b->priority;
 }
 
 /* Completes a thread switch by activating the new thread's page
